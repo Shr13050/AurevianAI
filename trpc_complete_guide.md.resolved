@@ -1,0 +1,850 @@
+# Complete tRPC Guide for Beginners
+
+This guide will walk you through your entire tRPC setup, explaining what tRPC is, what each file does, and how everything connects together.
+
+---
+
+## What is tRPC?
+
+**tRPC** stands for **TypeScript Remote Procedure Call**. Think of it as a way to call functions on your **server** from your **client** (browser) with full TypeScript type safety.
+
+### The Problem tRPC Solves
+
+Normally, when you build a web app:
+1. Your **frontend** (React) runs in the browser
+2. Your **backend** (API) runs on the server
+3. They communicate via HTTP requests (REST API, GraphQL, etc.)
+
+**The Challenge:** Keeping types in sync is hard! If you change your API on the server, you might break your frontend without knowing it.
+
+**tRPC's Solution:** It creates a **type-safe bridge** between your client and server. When you write a function on the server, you can call it from the client with **full autocomplete and type checking**!
+
+### Simple Analogy
+
+Think of tRPC like a telephone line between two rooms:
+- **Server Room:** Where your functions live (the backend)
+- **Client Room:** Where your React app lives (the browser)
+- **tRPC:** The phone system that lets them talk to each other perfectly
+
+---
+
+## Your tRPC Files Overview
+
+You have **6 main tRPC files** in your project:
+
+```
+src/trpc/
+├── init.ts                    # 🏗️  tRPC Setup & Configuration
+├── routers/
+│   └── _app.ts               # 🛣️  API Routes (Your Endpoints)
+├── query-client.ts            # 🗄️  React Query Configuration
+├── server.tsx                 # ⚙️  Server-Side tRPC Instance
+└── client.tsx                 # 🌐 Client-Side Provider
+
+src/app/api/trpc/[trpc]/
+└── route.ts                   # 🚪 API Endpoint Handler
+```
+
+### The Flow
+
+```mermaid
+graph TB
+    A[Browser/Client] -->|Makes Request| B[client.tsx]
+    B -->|HTTP Request| C[route.ts API Handler]
+    C -->|Uses| D[init.ts tRPC Config]
+    C -->|Calls| E[routers/_app.ts]
+    E -->|Uses| D
+    E -->|Returns Data| C
+    C -->|HTTP Response| B
+    B -->|Updates UI| A
+    
+    F[Server Components] -->|Direct Call| G[server.tsx]
+    G -->|Uses| D
+    G -->|Calls| E
+```
+
+---
+
+## File-by-File Breakdown
+
+---
+
+## 1️⃣ [init.ts](file:///d:/AurevianAI/aurevian/src/trpc/init.ts) - The Foundation
+
+**Purpose:** This is where you **initialize** and **configure** tRPC. It's the foundation everything else builds on.
+
+### Line-by-Line Explanation
+
+```typescript
+import { initTRPC } from '@trpc/server';
+```
+**Line 1:** Import the `initTRPC` function from the tRPC library. This is the main function to set up tRPC.
+
+---
+
+```typescript
+import { cache } from 'react';
+```
+**Line 2:** Import React's `cache` function. This helps avoid recreating the same context multiple times during a single request (improves performance).
+
+---
+
+```typescript
+import superjson from 'superjson';
+```
+**Line 3:** Import SuperJSON, a library that can serialize/deserialize complex data types (like `Date`, `Map`, `Set`, `undefined`) that regular JSON can't handle.
+
+---
+
+```typescript
+export const createTRPCContext = cache(async () => {
+```
+**Line 4:** Create a function that builds the **context** for your tRPC requests.
+- **Context** = Data available to all your API endpoints (like user info, database connection, etc.)
+- `cache()` = Makes sure we don't recreate this during the same request
+- `async` = Can do asynchronous operations (like fetching user data)
+
+---
+
+```typescript
+  /**
+   * @see: https://trpc.io/docs/server/context
+   */
+  return { userId: 'user_123' };
+});
+```
+**Lines 5-8:** The context returns an object with `userId`.
+- Right now it's hardcoded to `'user_123'` (for demo purposes)
+- In a real app, you'd get the actual logged-in user from cookies/sessions
+- Every API endpoint can access this `userId`
+
+---
+
+```typescript
+const t = initTRPC.create({
+```
+**Line 14:** Create the tRPC instance using `initTRPC.create()`.
+- We store it in a variable `t` (just a convention)
+- This `t` object has all the tools to build your API
+
+---
+
+```typescript
+  transformer: superjson,
+});
+```
+**Lines 18-19:** Configure tRPC to use SuperJSON as the data transformer.
+- **Why?** So you can send/receive complex types like `Date` objects
+- Without this, you'd only be able to use basic JSON types (strings, numbers, arrays, plain objects)
+
+---
+
+```typescript
+export const createTRPCRouter = t.router;
+```
+**Line 21:** Export the router creator.
+- A **router** is a collection of API endpoints (like "/hello", "/getUser", etc.)
+- This is what you'll use to define your API in other files
+
+---
+
+```typescript
+export const createCallerFactory = t.createCallerFactory;
+```
+**Line 22:** Export the caller factory (used for server-side calls).
+- Lets you call your API endpoints **directly** from server-side code (without HTTP)
+
+---
+
+```typescript
+export const baseProcedure = t.procedure;
+```
+**Line 23:** Export the base procedure.
+- A **procedure** is a single API endpoint
+- You'll use this to create individual endpoints like `hello`, `getUser`, etc.
+
+---
+
+## 2️⃣ [routers/_app.ts](file:///d:/AurevianAI/aurevian/src/trpc/routers/_app.ts) - Your API Endpoints
+
+**Purpose:** This is where you **define your actual API endpoints** (the functions your client can call).
+
+### Line-by-Line Explanation
+
+```typescript
+import { email, z } from 'zod';
+```
+**Line 1:** Import validation tools from Zod.
+- **Zod** is a TypeScript-first validation library
+- `z` is the main object used to define data shapes
+- `email` is a specific validator (though it's imported but not used in this file)
+
+---
+
+```typescript
+import { baseProcedure, createTRPCRouter } from '../init';
+```
+**Line 2:** Import the tools we exported from [init.ts](file:///d:/AurevianAI/aurevian/src/trpc/init.ts).
+- `createTRPCRouter` = Used to create the main router
+- `baseProcedure` = Used to create individual endpoints
+
+---
+
+```typescript
+import { inngest } from '@/inngest/client';
+```
+**Line 3:** Import Inngest client (for background jobs).
+- Inngest is a separate tool for running background tasks
+- Not directly related to tRPC, but used inside one of your endpoints
+
+---
+
+```typescript
+export const appRouter = createTRPCRouter({
+```
+**Line 4:** Create the main application router.
+- This object will contain all your API endpoints
+- Export it so other files can use it
+
+---
+
+```typescript
+  invoke: baseProcedure
+```
+**Line 5:** Start defining an endpoint called `invoke`.
+- Clients will call this as `trpc.invoke.mutate(...)`
+
+---
+
+```typescript
+    .input(
+      z.object({
+        text: z.string()
+      })
+    )
+```
+**Lines 6-10:** Define the **input validation** for this endpoint.
+- `.input()` = Define what data this endpoint expects
+- `z.object({ text: z.string() })` = Expects an object like `{ text: "some string" }`
+- If the client sends wrong data (e.g., a number instead of string), tRPC will reject it
+
+---
+
+```typescript
+    .mutation(async ({ input }) => {
+```
+**Line 11:** Define this as a **mutation** (an action that changes data).
+- **Query** = Read data (GET request)
+- **Mutation** = Change data (POST/PUT/DELETE)
+- `async` = This function does asynchronous work
+- `{ input }` = The validated input object from line 6-9
+
+---
+
+```typescript
+      await inngest.send({
+        name: "test/hello.world",
+        data: {
+          email: input.text,
+        }
+      })
+    }),
+```
+**Lines 12-17:** Send a background job to Inngest.
+- Takes the `input.text` and sends it as `email` to Inngest
+- This triggers a background job named `"test/hello.world"`
+
+---
+
+```typescript
+  hello: baseProcedure
+```
+**Line 19:** Start defining another endpoint called `hello`.
+- Clients will call this as `trpc.hello.useQuery(...)`
+
+---
+
+```typescript
+    .input(
+      z.object({
+        text: z.string(),
+      }),
+    )
+```
+**Lines 20-24:** Input validation for the `hello` endpoint.
+- Same as before: expects `{ text: "some string" }`
+
+---
+
+```typescript
+    .query((opts) => {
+      return {
+        greeting: `hello ${opts.input.text}`,
+      };
+    }),
+});
+```
+**Lines 25-29:** Define this as a **query** (read-only operation).
+- Takes the input text
+- Returns an object: `{ greeting: "hello <whatever you sent>" }`
+- Example: If you send `{ text: "World" }`, you get back `{ greeting: "hello World" }`
+
+---
+
+```typescript
+export type AppRouter = typeof appRouter;
+```
+**Line 32:** **SUPER IMPORTANT!** Export the **TYPE** of your router.
+- This is what gives you type safety on the client!
+- The client will import this type and get full autocomplete for all your endpoints
+
+---
+
+## 3️⃣ [query-client.ts](file:///d:/AurevianAI/aurevian/src/trpc/query-client.ts) - React Query Config
+
+**Purpose:** Configure React Query (the library that manages data fetching and caching in React).
+
+### Line-by-Line Explanation
+
+```typescript
+import {
+  defaultShouldDehydrateQuery,
+  QueryClient,
+} from '@tanstack/react-query';
+```
+**Lines 1-4:** Import React Query tools.
+- [QueryClient](file:///d:/AurevianAI/aurevian/src/trpc/client.tsx#13-25) = The main client that manages all queries and caching
+- `defaultShouldDehydrateQuery` = Default function to decide what data to serialize
+
+---
+
+```typescript
+import superjson from 'superjson';
+```
+**Line 5:** Import SuperJSON (same as before).
+
+---
+
+```typescript
+export function makeQueryClient() {
+  return new QueryClient({
+```
+**Lines 6-7:** Create and export a function that builds a QueryClient.
+- This is a factory function – it creates a new QueryClient each time it's called
+
+---
+
+```typescript
+    defaultOptions: {
+      queries: {
+        staleTime: 30 * 1000,
+      },
+```
+**Lines 8-11:** Configure default query options.
+- `staleTime: 30 * 1000` = 30 seconds (in milliseconds)
+- **Stale time** = How long data is considered "fresh" before refetching
+- After 30 seconds, data is "stale" and will be refetched when needed
+
+---
+
+```typescript
+      dehydrate: {
+        serializeData: superjson.serialize,
+        shouldDehydrateQuery: (query) =>
+          defaultShouldDehydrateQuery(query) ||
+          query.state.status === 'pending',
+      },
+```
+**Lines 12-17:** Configure **dehydration** (server → client).
+- **Dehydration** = Converting server data to a format that can be sent to the browser
+- `serializeData: superjson.serialize` = Use SuperJSON to serialize
+- [shouldDehydrateQuery](file:///d:/AurevianAI/aurevian/src/trpc/query-client.ts#14-17) = Decide which queries to send to the client
+- `query.state.status === 'pending'` = Also send queries that are still loading
+
+---
+
+```typescript
+      hydrate: {
+        deserializeData: superjson.deserialize,
+      },
+```
+**Lines 18-20:** Configure **hydration** (client receives data).
+- **Hydration** = Converting the serialized data back to normal objects
+- `deserializeData: superjson.deserialize` = Use SuperJSON to deserialize
+
+---
+
+## 4️⃣ [server.tsx](file:///d:/AurevianAI/aurevian/src/trpc/server.tsx) - Server-Side tRPC
+
+**Purpose:** Create a tRPC instance for calling your API **directly from server components** (without HTTP).
+
+### Line-by-Line Explanation
+
+```typescript
+import 'server-only';
+```
+**Line 1:** This special import ensures this file can **NEVER** be imported from client code.
+- If you try to import this in a client component, you'll get a build error
+- This prevents accidentally exposing server-only code to the browser
+
+---
+
+```typescript
+import { createTRPCOptionsProxy } from '@trpc/tanstack-react-query';
+import { cache } from 'react';
+import { createTRPCContext } from './init';
+import { makeQueryClient } from './query-client';
+import { appRouter } from './routers/_app';
+```
+**Lines 2-6:** Import all the pieces we need:
+- `createTRPCOptionsProxy` = Creates a server-side tRPC client
+- `cache` = React's cache function
+- `createTRPCContext` = Our context creator from init.ts
+- [makeQueryClient](file:///d:/AurevianAI/aurevian/src/trpc/query-client.ts#6-24) = Our query client factory
+- `appRouter` = Our API router
+
+---
+
+```typescript
+export const getQueryClient = cache(makeQueryClient);
+```
+**Line 9:** Create a cached getter for the query client.
+- `cache(makeQueryClient)` = Ensures the same query client is reused during a single request
+- **Why?** Performance and consistency – you want the same cache during one request
+
+---
+
+```typescript
+export const trpc = createTRPCOptionsProxy({
+  ctx: createTRPCContext,
+  router: appRouter,
+  queryClient: getQueryClient,
+});
+```
+**Lines 10-14:** Create the server-side tRPC client.
+- This is what you use in **server components** to call your API
+- `ctx: createTRPCContext` = Use our context creator
+- `router: appRouter` = Use our API router
+- `queryClient: getQueryClient` = Use our cached query client
+
+**How to use it:**
+```typescript
+// In a server component:
+const result = await trpc.hello.fetch({ text: "World" });
+```
+
+---
+
+## 5️⃣ [client.tsx](file:///d:/AurevianAI/aurevian/src/trpc/client.tsx) - Client-Side Provider
+
+**Purpose:** Create the tRPC client for **browser use** and provide it to your React app.
+
+### Line-by-Line Explanation
+
+```typescript
+'use client';
+```
+**Line 1:** Mark this as a **client component** (runs in the browser).
+- Needed because we use React hooks and browser APIs
+
+---
+
+```typescript
+import superjson from 'superjson';
+import type { QueryClient } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { createTRPCClient, httpBatchLink } from '@trpc/client';
+import { createTRPCContext } from '@trpc/tanstack-react-query';
+import { useState } from 'react';
+import { makeQueryClient } from './query-client';
+import type { AppRouter } from './routers/_app';
+```
+**Lines 3-10:** Import everything we need for the client.
+- `httpBatchLink` = Batches multiple requests into one HTTP call (performance!)
+- `createTRPCContext` = Creates React hooks for tRPC
+- **Note:** Line 10 imports [AppRouter](file:///d:/AurevianAI/aurevian/src/trpc/routers/_app.ts#32-33) TYPE – this gives type safety!
+
+---
+
+```typescript
+export const { TRPCProvider, useTRPC } = createTRPCContext<AppRouter>();
+```
+**Line 11:** **MAGIC LINE!** Create the tRPC React hooks.
+- `createTRPCContext<AppRouter>()` = Use the AppRouter type from your server
+- This generates:
+  - `TRPCProvider` = React provider component
+  - `useTRPC` = Hook to access tRPC (you'll use `useTRPC()` in components)
+
+---
+
+```typescript
+let browserQueryClient: QueryClient;
+
+function getQueryClient() {
+  if (typeof window === 'undefined') {
+    // Server: always make a new query client
+    return makeQueryClient();
+  }
+  // Browser: make a new query client if we don't already have one
+  if (!browserQueryClient) browserQueryClient = makeQueryClient();
+  return browserQueryClient;
+}
+```
+**Lines 12-24:** Smart query client management.
+- **On Server:** Always create a new client (Line 16)
+- **In Browser:** Create one client and reuse it (Lines 22-23)
+- **Why the difference?**
+  - Server: Each request is isolated
+  - Browser: One client persists across the entire app session
+
+---
+
+```typescript
+function getUrl() {
+  const base = (() => {
+    if (typeof window !== 'undefined') return '';
+    if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+    return 'http://localhost:3000';
+  })();
+  return `${base}/api/trpc`;
+}
+```
+**Lines 25-32:** Figure out the API URL.
+- **In Browser (Line 27):** Use relative URL `''` (same domain)
+- **On Server, on Vercel (Line 28):** Use Vercel's URL
+- **On Server, locally (Line 29):** Use `http://localhost:3000`
+- **Final URL (Line 31):** Add `/api/trpc` to the base
+
+---
+
+```typescript
+export function TRPCReactProvider(
+  props: Readonly<{
+    children: React.ReactNode;
+  }>,
+) {
+```
+**Lines 33-37:** Define the provider component.
+- This wraps your entire app
+- `children` = Your app components
+
+---
+
+```typescript
+  const queryClient = getQueryClient();
+  const [trpcClient] = useState(() =>
+    createTRPCClient<AppRouter>({
+      links: [
+        httpBatchLink({
+          transformer: superjson,
+          url: getUrl(),
+        }),
+      ],
+    }),
+  );
+```
+**Lines 42-52:** Create the tRPC client.
+- [getQueryClient()](file:///d:/AurevianAI/aurevian/src/trpc/client.tsx#13-25) = Get the query client
+- `useState(() => createTRPCClient(...))` = Create the tRPC client once
+- `httpBatchLink` = Use HTTP batching for requests
+- `transformer: superjson` = Use SuperJSON for data serialization
+- `url: getUrl()` = Use the API URL we calculated
+
+---
+
+```typescript
+  return (
+    <QueryClientProvider client={queryClient}>
+      <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
+        {props.children}
+      </TRPCProvider>
+    </QueryClientProvider>
+  );
+}
+```
+**Lines 53-59:** Render the providers.
+- **Outer:** `QueryClientProvider` = Provides React Query to your app
+- **Inner:** `TRPCProvider` = Provides tRPC to your app (with both clients)
+- **Children:** Your actual app components
+
+---
+
+## 6️⃣ [route.ts](file:///d:/AurevianAI/aurevian/src/app/api/trpc/[trpc]/route.ts) - HTTP API Handler
+
+**Purpose:** The **actual HTTP endpoint** that receives requests from the browser.
+
+### Line-by-Line Explanation
+
+```typescript
+import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
+```
+**Line 1:** Import the fetch adapter for tRPC.
+- **Adapter** = Connects tRPC to Next.js's fetch-based API routes
+
+---
+
+```typescript
+import { createTRPCContext } from '../../../../trpc/init';
+import { appRouter } from '../../../../trpc/routers/_app';
+```
+**Lines 2-3:** Import our tRPC setup.
+- `createTRPCContext` = Our context creator
+- `appRouter` = Our API router
+
+---
+
+```typescript
+const handler = (req: Request) =>
+    fetchRequestHandler({
+        endpoint: '/api/trpc',
+        req,
+        router: appRouter,
+        createContext: createTRPCContext,
+    });
+```
+**Lines 4-10:** Create the request handler.
+- `req: Request` = The incoming HTTP request
+- `fetchRequestHandler` = tRPC's handler that processes the request
+- `endpoint: '/api/trpc'` = The base URL path
+- `req` = Pass the request object
+- `router: appRouter` = Use our API router
+- `createContext: createTRPCContext` = Create context for each request
+
+---
+
+```typescript
+export { handler as GET, handler as POST };
+```
+**Line 11:** Export the handler for GET and POST requests.
+- Next.js App Router expects named exports `GET` and `POST`
+- Same handler works for both (tRPC handles the routing internally)
+
+---
+
+## How Everything Works Together
+
+Let's trace a complete request from your React component to the server and back!
+
+### Example: Calling the `hello` endpoint
+
+#### 1. **In Your React Component (Browser)**
+
+```typescript
+'use client';
+import { useTRPC } from '@/trpc/client';
+
+export default function MyComponent() {
+  const trpc = useTRPC();
+  
+  // Call the hello endpoint
+  const { data } = trpc.hello.useQuery({ text: "World" });
+  
+  return <div>{data?.greeting}</div>;
+}
+```
+
+#### 2. **What Happens Behind the Scenes**
+
+```mermaid
+sequenceDiagram
+    participant Component as Your Component
+    participant Client as client.tsx (TRPCProvider)
+    participant HTTP as Browser HTTP
+    participant Route as route.ts (API Handler)
+    participant Router as routers/_app.ts
+    participant Server as Your Server Logic
+
+    Component->>Client: trpc.hello.useQuery({ text: "World" })
+    Client->>HTTP: POST /api/trpc/hello
+    Note over HTTP: Request body: { text: "World" }
+    HTTP->>Route: Receives HTTP request
+    Route->>Router: Calls hello procedure
+    Router->>Server: Processes query
+    Server-->>Router: Returns { greeting: "hello World" }
+    Router-->>Route: Returns response
+    Route-->>HTTP: HTTP response
+    HTTP-->>Client: Receives data
+    Client-->>Component: Updates with data
+    Note over Component: data = { greeting: "hello World" }
+```
+
+#### 3. **Step-by-Step Flow**
+
+1. **Component calls tRPC:** `trpc.hello.useQuery({ text: "World" })`
+   
+2. **Client (client.tsx):**
+   - Creates HTTP request
+   - Uses `httpBatchLink` to send: `POST /api/trpc/hello`
+   - Serializes data with SuperJSON: `{ text: "World" }`
+
+3. **API Route (route.ts):**
+   - Next.js receives the request at `/api/trpc/hello`
+   - Calls `fetchRequestHandler`
+   
+4. **Handler:**
+   - Creates context: `createTRPCContext()` → `{ userId: 'user_123' }`
+   - Finds the right endpoint: `appRouter.hello`
+   
+5. **Router (routers/_app.ts):**
+   - Validates input with Zod: ✅ `{ text: "World" }` is valid
+   - Runs the query function
+   - Returns: `{ greeting: "hello World" }`
+   
+6. **Response travels back:**
+   - Serialized with SuperJSON
+   - Sent as HTTP response
+   - Deserialized in the browser
+   - React Query caches it
+   - Component re-renders with the data
+
+---
+
+## Key Concepts Summary
+
+### 🔑 **Context**
+- Created by `createTRPCContext()` in [init.ts](file:///d:/AurevianAI/aurevian/src/trpc/init.ts)
+- Available to all procedures
+- Contains shared data like `userId`, database connections, etc.
+
+### 🔑 **Procedure**
+- A single API endpoint
+- Can be a **query** (read data) or **mutation** (change data)
+- Has input validation with Zod
+
+### 🔑 **Router**
+- A collection of procedures
+- Created with `createTRPCRouter`
+- Your `appRouter` contains all your endpoints
+
+### 🔑 **Transformer**
+- Converts data for sending over HTTP
+- You use `superjson` to handle complex types
+
+### 🔑 **Query vs Mutation**
+
+| | Query | Mutation |
+|---|---|---|
+| **Purpose** | Read data | Change data |
+| **HTTP equivalent** | GET | POST/PUT/DELETE |
+| **Can change server state?** | No | Yes |
+| **Example** | Get user profile | Update user profile |
+| **React Hook** | `useQuery` | `useMutation` |
+
+---
+
+## Common Patterns
+
+### ✅ Creating a new endpoint
+
+```typescript
+// In routers/_app.ts
+export const appRouter = createTRPCRouter({
+  getUser: baseProcedure
+    .input(z.object({ id: z.string() }))
+    .query(async ({ input, ctx }) => {
+      // ctx.userId is available here!
+      const user = await db.user.findUnique({ where: { id: input.id } });
+      return user;
+    }),
+});
+```
+
+### ✅ Using it in a component
+
+```typescript
+'use client';
+import { useTRPC } from '@/trpc/client';
+
+export function UserProfile({ userId }: { userId: string }) {
+  const trpc = useTRPC();
+  const { data: user, isLoading } = trpc.getUser.useQuery({ id: userId });
+  
+  if (isLoading) return <div>Loading...</div>;
+  return <div>Hello, {user.name}!</div>;
+}
+```
+
+### ✅ Using it in a server component
+
+```typescript
+import { trpc } from '@/trpc/server';
+
+export default async function ServerPage() {
+  const user = await trpc.getUser.fetch({ id: 'user_123' });
+  return <div>Hello, {user.name}!</div>;
+}
+```
+
+---
+
+## Common Questions
+
+### ❓ Why do we need both [client.tsx](file:///d:/AurevianAI/aurevian/src/trpc/client.tsx) and [server.tsx](file:///d:/AurevianAI/aurevian/src/trpc/server.tsx)?
+
+- **[client.tsx](file:///d:/AurevianAI/aurevian/src/trpc/client.tsx):** For browser/client components (uses HTTP requests)
+- **[server.tsx](file:///d:/AurevianAI/aurevian/src/trpc/server.tsx):** For server components (direct function calls, no HTTP)
+
+### ❓ What's the `[trpc]` folder name in the API route?
+
+It's a **catch-all route** in Next.js. It captures all requests to `/api/trpc/*` and routes them to tRPC's handler.
+
+### ❓ Why SuperJSON?
+
+Because regular JSON can't handle:
+- `Date` objects (becomes a string)
+- `undefined` (becomes `null`)
+- `Map`, `Set`, `BigInt`, etc.
+
+SuperJSON preserves these types across the network!
+
+### ❓ What's batching in `httpBatchLink`?
+
+If you make multiple tRPC calls at once:
+```typescript
+trpc.hello.useQuery({ text: "A" });
+trpc.hello.useQuery({ text: "B" });
+trpc.hello.useQuery({ text: "C" });
+```
+
+Instead of 3 HTTP requests, it batches them into **1 request**! Much faster.
+
+---
+
+## Next Steps
+
+Now that you understand your tRPC setup, you can:
+
+1. **Add more endpoints** in [routers/_app.ts](file:///d:/AurevianAI/aurevian/src/trpc/routers/_app.ts)
+2. **Use real authentication** in `createTRPCContext`3. **Create protected procedures** that require login
+4. **Split routers** into multiple files for organization
+5. **Add middleware** for logging, rate limiting, etc.
+
+---
+
+## Quick Reference
+
+### Import Map
+
+| What you need | Import from |
+|---|---|
+| Create endpoints | `import { baseProcedure, createTRPCRouter } from '@/trpc/init'` |
+| Use in client components | `import { useTRPC } from '@/trpc/client'` |
+| Use in server components | `import { trpc } from '@/trpc/server'` |
+| Validate input | `import { z } from 'zod'` |
+
+### File Purposes
+
+| File | Purpose | Used By |
+|---|---|---|
+| [init.ts](file:///d:/AurevianAI/aurevian/src/trpc/init.ts) | Setup & config | Everything |
+| [routers/_app.ts](file:///d:/AurevianAI/aurevian/src/trpc/routers/_app.ts) | Define endpoints | API handler |
+| [query-client.ts](file:///d:/AurevianAI/aurevian/src/trpc/query-client.ts) | React Query config | Providers |
+| [server.tsx](file:///d:/AurevianAI/aurevian/src/trpc/server.tsx) | Server-side client | Server components |
+| [client.tsx](file:///d:/AurevianAI/aurevian/src/trpc/client.tsx) | Browser client | Client components |
+| [route.ts](file:///d:/AurevianAI/aurevian/src/app/api/trpc/%5Btrpc%5D/route.ts) | HTTP handler | Next.js API routes |
+
+---
+
+**You now have a complete understanding of your tRPC setup! 🎉**
+
+Feel free to ask if you have any questions about specific parts!
